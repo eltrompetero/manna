@@ -353,8 +353,6 @@ class ARW2D(ARW1D):
             Lifetime of avalanche.
         int
             Size of cascade as the number of affected sites per turn summed.
-        int 
-            Location of tracer particle.
         """
 
         counter = 0
@@ -367,6 +365,37 @@ class ARW2D(ARW1D):
             counter += 1
 
         return counter, cascadeSize
+
+    def _relax_snapshot(self, max_iters=10_000):
+        """This is the same as ._relax() except that we save snapshot of toppling points
+        at every iteration.
+        
+        Parameters
+        ----------
+        max_iters : int, 10_000
+
+        Returns
+        -------
+        int
+            Lifetime of avalanche.
+        int
+            Size of cascade as the number of affected sites per turn summed.
+        int 
+            List of indices tracking each site that has collapsed at each time step.
+        """
+
+        ixHistory = []
+        counter = 0
+        cascadeSize = 0  # should be related to the number of particles lost on the side
+        ix = self.lattice>=2
+        while ix.any() and counter<max_iters:
+            # move one particle to the left and one to the right for each overloaded site
+            self.lattice, ix = random_transfer_2d(self.lattice, 2)
+            ixHistory.append(ix)
+            cascadeSize += ix.sum()
+            counter += 1
+
+        return counter, cascadeSize, ixHistory
 
     def relax(self, conserved=False, **kwargs):
         if conserved:
