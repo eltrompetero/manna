@@ -180,10 +180,13 @@ class ARW1D():
         ndarray
             Sizes measured by the number of active sites. The total number of particles
             that move is a constant multiplied by this.
+         ndarray
+            Sizes measured by the number of unique sites affected.           
         """
 
         t = np.zeros(n_samples, dtype=int)
         s = np.zeros(n_samples, dtype=int)
+        sx = np.zeros(n_samples, dtype=int)  # unique sites affected
 
         i = 0
         while i<n_samples:
@@ -191,13 +194,15 @@ class ARW1D():
             if conserved:
                 self.remove()
             
-            t[i], s[i] = self.relax(conserved=conserved, max_iters=max_iters)
+            t[i], cumix = self.relax(conserved=conserved, max_iters=max_iters)
+            s[i] = cumix.sum()
+            sx[i] = (cumix>0).sum()
             # ignore moves that don't cause any cascade
             if t[i]==0:
                 i -= 1
             i += 1
 
-        return t, s
+        return t, s, sx
 
 @njit
 def random_transfer_1d(lattice, k):
@@ -349,19 +354,19 @@ class ARW2D(ARW1D):
         int
             Lifetime of avalanche.
         int
-            Size of cascade as the number of affected sites per turn summed.
+            Number of times each lattice site topples in the same shape as lattice.
         """
 
         counter = 0
-        cascadeSize = 0  # should be related to the number of particles lost on the side
         ix = self.lattice>=2
+        cumix = np.zeros_like(self.lattice)
         while ix.any() and counter<max_iters:
             # move one particle to the left and one to the right for each overloaded site
             self.lattice, ix = random_transfer_2d(self.lattice, 2)
-            cascadeSize += ix.sum()
+            cumix += ix
             counter += 1
 
-        return counter, cascadeSize
+        return counter, cumix
 
     def _relax_snapshot(self, max_iters=10_000):
         """This is the same as ._relax() except that we save snapshot of toppling points
