@@ -10,7 +10,6 @@ from numba import boolean, uint64
 class ARW1D():
     def __init__(self, density, L,
                  rng=np.random,
-                 periodic=False,
                  density_as_particle_number=False):
         """
         Parameters
@@ -19,7 +18,6 @@ class ARW1D():
         L : int
             System lattice size.
         rng : np.random.RandomState
-        periodic : bool, False
         density_as_particle_number : bool, False
             If True, take density parameter as the total number of particles instead. Must
             be an integer in this case.
@@ -64,7 +62,7 @@ class ARW1D():
         ix = self.lattice>=2
         cascadeSize += ix.sum()
         while ix.any() and counter<max_iters:
-            self.lattice, ix = random_transfer_periodic(self.lattice)
+            self.lattice, ix = random_transfer_periodic_1d(self.lattice)
             #self.lattice[ix] -= 2
             #self.lattice[np.roll(ix,1)] += 1
             #self.lattice[np.roll(ix,-1)] += 1
@@ -105,30 +103,30 @@ class ARW1D():
         cascadeSize = 0  # should be related to the number of particles lost on the side
         ix = self.lattice>=2
         while ix.any() and counter<max_iters:
-            if 0<=tracer_ix<self.L and self.lattice[tracer_ix]>=2:
-                # tracer is randomly selected
-                if self.rng.rand()<(2/self.lattice[tracer_ix]):
-                    if self.rng.rand()<.5:
-                        tracer_ix -= 1
-                    else:
-                        tracer_ix += 1
+            #if 0<=tracer_ix<self.L and self.lattice[tracer_ix]>=2:
+            #    # tracer is randomly selected
+            #    if self.rng.rand()<(2/self.lattice[tracer_ix]):
+            #        if self.rng.rand()<.5:
+            #            tracer_ix -= 1
+            #        else:
+            #            tracer_ix += 1
             
+            self.lattice, ix = random_transfer_1d(self.lattice, 2)
             # move one particle to the left and one to the right for each overloaded site
-            self.lattice[ix] -= 2
+            #self.lattice[ix] -= 2
             cascadeSize += ix.sum()
 
-            shiftplus = np.roll(ix, 1)
-            shiftplus[0] = False
-            self.lattice[shiftplus] += 1
+            #shiftplus = np.roll(ix, 1)
+            #shiftplus[0] = False
+            #self.lattice[shiftplus] += 1
 
-            shiftminus = np.roll(ix, -1)
-            shiftminus[-1] = False
-            self.lattice[shiftminus] += 1
+            #shiftminus = np.roll(ix, -1)
+            #shiftminus[-1] = False
+            #self.lattice[shiftminus] += 1
 
-            ix = self.lattice>=2
+            #ix = self.lattice>=2
             counter += 1
-
-        return counter, cascadeSize, tracer_ix
+        return counter, cascadeSize
 
     def relax(self, conserved=False, **kwargs):
         if conserved:
@@ -162,8 +160,82 @@ class ARW1D():
         ix = self.rng.choice(np.where(self.lattice)[0])
         self.lattice[ix] -= 1
 
+    def sample(self, n_samples,
+               max_iters=1_000_000,
+               conserved=False):
+        """Sample cascades. Likely, you will want to relax the system to a stable
+        configuration first by calling relax().
+
+        Parameters
+        ----------
+        n_samples : int
+        max_iters : int, 1_000_000
+        conserved : bool, False
+            If True, conserve particle number.
+
+        Returns
+        -------
+        ndarray
+            Durations.
+        ndarray
+            Sizes measured by the number of active sites. The total number of particles
+            that move is a constant multiplied by this.
+        """
+
+        t = np.zeros(n_samples, dtype=int)
+        s = np.zeros(n_samples, dtype=int)
+
+        i = 0
+        while i<n_samples:
+            self.add()
+            if conserved:
+                self.remove()
+            
+            t[i], s[i] = self.relax(conserved=conserved, max_iters=max_iters)
+            # ignore moves that don't cause any cascade
+            if t[i]==0:
+                i -= 1
+            i += 1
+
+        return t, s
+
 @njit
-def random_transfer_periodic(lattice):
+def random_transfer_1d(lattice, k):
+    """Randomly transfer k particles from each site to adjacent sites when there are at
+    least two particles per site.
+
+    Parameters
+    ----------
+    lattice : ndarray
+    k : int
+
+    Returns
+    -------
+    ndarray
+        Copy of new lattice.
+    ndarray
+        Index array of where there was toppling.
+    """
+    
+    newlattice = np.zeros(lattice.size, dtype=uint64)
+    ix = np.zeros(lattice.size, dtype=boolean)
+
+    for i in range(lattice.size):
+        if lattice[i]>=2:
+            ix[i] = True
+            newlattice[i] += lattice[i]-k
+            for particleix in range(k):
+                if np.random.rand()<.5:
+                    if i>0:
+                        newlattice[i-1] += 1
+                elif i<(lattice.size-1):
+                    newlattice[i+1] += 1
+        else:
+            newlattice[i] += lattice[i]
+    return newlattice, ix
+
+@njit
+def random_transfer_periodic_1d(lattice):
     """Randomly transfer 2 particles from each site to adjacent sites when there are at
     least two particles per site.
 
@@ -203,7 +275,6 @@ def random_transfer_periodic(lattice):
 class ARW2D():
     def __init__(self, density, L,
                  rng=np.random,
-                 periodic=False,
                  density_as_particle_number=False):
         """
         Parameters
@@ -212,7 +283,6 @@ class ARW2D():
         L : int
             System lattice length on each size.
         rng : np.random.RandomState
-        periodic : bool, False
         density_as_particle_number : bool, False
             If True, take density parameter as the total number of particles instead. Must
             be an integer in this case.
@@ -257,7 +327,7 @@ class ARW2D():
         ix = self.lattice>=2
         cascadeSize += ix.sum()
         while ix.any() and counter<max_iters:
-            self.lattice, ix = random_transfer_periodic_2d(self.lattice)
+            self.lattice, ix = random_transfer_periodic_2d(self.lattice, 2)
             cascadeSize += ix.sum()
 
             counter += 1
@@ -292,7 +362,7 @@ class ARW2D():
         ix = self.lattice>=2
         while ix.any() and counter<max_iters:
             # move one particle to the left and one to the right for each overloaded site
-            self.lattice, ix = random_transfer_2d(self.lattice)
+            self.lattice, ix = random_transfer_2d(self.lattice, 2)
             cascadeSize += ix.sum()
             counter += 1
 
@@ -308,7 +378,7 @@ class ARW2D():
 
         Parameters
         ----------
-        ix : int
+        ix : twople, None
         """
 
         ix = ix or self.rng.randint(self.L, size=2)
@@ -332,13 +402,14 @@ class ARW2D():
         self.lattice[ix[0][ixofix],ix[1][ixofix]] -= 1
 
 @njit
-def random_transfer_2d(lattice):
-    """Randomly transfer 2 particles from each site to adjacent sites when there are at
+def random_transfer_2d(lattice, k):
+    """Randomly transfer k particles from each site to adjacent sites when there are at
     least two particles per site.
 
     Parameters
     ----------
     lattice : ndarray
+    k : int
 
     Returns
     -------
@@ -353,10 +424,10 @@ def random_transfer_2d(lattice):
 
     for i in range(lattice.size):
         for j in range(lattice.size):
-            if lattice[i,j]>=2:
+            if lattice[i,j]>=k:
                 ix[i,j] = True
-                newlattice[i,j] += lattice[i,j]-2
-                for particleix in range(2):
+                newlattice[i,j] += lattice[i,j]-k
+                for particleix in range(k):
                     if np.random.rand()<.5:
                         if i>0:
                             if np.random.rand()<.5:
@@ -375,13 +446,14 @@ def random_transfer_2d(lattice):
     return newlattice, ix
 
 @njit
-def random_transfer_periodic_2d(lattice):
+def random_transfer_periodic_2d(lattice, k):
     """Randomly transfer 2 particles from each site to adjacent sites when there are at
     least two particles per site.
 
     Parameters
     ----------
     lattice : ndarray
+    k : int
 
     Returns
     -------
@@ -397,10 +469,10 @@ def random_transfer_periodic_2d(lattice):
 
     for i in range(L):
         for j in range(L):
-            if lattice[i,j]>=2:
+            if lattice[i,j]>=k:
                 ix[i,j] = True
-                newlattice[i,j] += lattice[i,j]-2
-                for particleix in range(2):
+                newlattice[i,j] += lattice[i,j]-k
+                for particleix in range(k):
                     if np.random.rand()<.5:
                         if np.random.rand()<.5:
                             newlattice[(i-1)%L,(j-1)%L] += 1

@@ -1,5 +1,5 @@
 # ====================================================================================== #
-# Activated random walkers models.
+# Testing module for activated random walkers models.
 # Author: Eddie Lee, edl56@cornell.edu
 # ====================================================================================== #
 from .arw import *
