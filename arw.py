@@ -235,7 +235,7 @@ def random_transfer_1d(lattice, k):
     return newlattice, ix
 
 @njit
-def random_transfer_periodic_1d(lattice):
+def random_transfer_periodic_1d(lattice, k):
     """Randomly transfer 2 particles from each site to adjacent sites when there are at
     least two particles per site.
 
@@ -255,17 +255,14 @@ def random_transfer_periodic_1d(lattice):
     ix = np.zeros(lattice.size, dtype=boolean)
 
     for i in range(lattice.size):
-        if lattice[i]>=2:
+        if lattice[i]>=k:
             ix[i] = True
-            newlattice[i] += lattice[i]-2
-            if np.random.rand()<.5:
-                newlattice[(i-1)%lattice.size] += 1
-            else:
-                newlattice[(i+1)%lattice.size] += 1
-            if np.random.rand()<.5:
-                newlattice[(i-1)%lattice.size] += 1
-            else:
-                newlattice[(i+1)%lattice.size] += 1
+            newlattice[i] += lattice[i]-k
+            for particleix in range(k):
+                if np.random.rand()<.5:
+                    newlattice[(i-1)%lattice.size] += 1
+                else:
+                    newlattice[(i+1)%lattice.size] += 1
         else:
             newlattice[i] += lattice[i]
     return newlattice, ix
@@ -458,19 +455,18 @@ def random_transfer_2d(lattice, k):
                 ix[i,j] = True
                 newlattice[i,j] += lattice[i,j]-k
                 for particleix in range(k):
-                    if np.random.rand()<.5:
+                    r = np.random.rand()
+                    if r<=.25:
                         if i>0:
-                            if np.random.rand()<.5:
-                                if j>0:
-                                    newlattice[i-1,j-1] += 1
-                            elif (j+1)<L:
-                                newlattice[i-1,j+1] += 1
+                            newlattice[i-1,j] += 1
+                    elif r<=.5:
+                        if j<(L-1):
+                                newlattice[i,j+1] += 1
+                    elif r<=.75:
+                        if j>0:
+                                newlattice[i,j-1] += 1
                     elif i<(L-1):
-                        if np.random.rand()<.5:
-                            if j>0:
-                                newlattice[i+1,j-1] += 1
-                        elif j<(L-1):
-                            newlattice[i+1,j+1] += 1
+                            newlattice[i+1,j] += 1
             else:
                 newlattice[i,j] += lattice[i,j]
     return newlattice, ix
@@ -503,16 +499,15 @@ def random_transfer_periodic_2d(lattice, k):
                 ix[i,j] = True
                 newlattice[i,j] += lattice[i,j]-k
                 for particleix in range(k):
-                    if np.random.rand()<.5:
-                        if np.random.rand()<.5:
-                            newlattice[(i-1)%L,(j-1)%L] += 1
-                        else:
-                            newlattice[(i-1)%L,(j+1)%L] += 1
+                    r = np.random.rand()
+                    if r<=.25:
+                        newlattice[(i-1)%L,j] += 1
+                    elif r<=.5:
+                        newlattice[i,(j+1)%L] += 1
+                    elif r<=.75:
+                        newlattice[i,(j-1)%L] += 1
                     else:
-                        if np.random.rand()<.5:
-                            newlattice[(i+1)%L,(j-1)%L] += 1
-                        else:
-                            newlattice[(i+1)%L,(j+1)%L] += 1
+                        newlattice[(i+1)%L,j] += 1
             else:
                 newlattice[i,j] += lattice[i,j]
     return newlattice, ix
