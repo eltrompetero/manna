@@ -200,6 +200,223 @@ def random_transfer_periodic(lattice):
 #end ARW1D
 
 
+class ARW2D():
+    def __init__(self, density, L,
+                 rng=np.random,
+                 periodic=False,
+                 density_as_particle_number=False):
+        """
+        Parameters
+        ----------
+        density : float
+        L : int
+            System lattice length on each size.
+        rng : np.random.RandomState
+        periodic : bool, False
+        density_as_particle_number : bool, False
+            If True, take density parameter as the total number of particles instead. Must
+            be an integer in this case.
+        """
+        
+        assert 0<density
+        assert L>1
+        
+        if density_as_particle_number:
+            assert density%1==0, "If specifying particle number this must be an integer."
+        self.density = density
+        self.density_is_density = not density_as_particle_number
+        self.L = L
+        self.rng = rng
+
+        self.initialize()
+
+    def initialize(self):
+        self.lattice = np.zeros((self.L,self.L), dtype=int)
+        if self.density_is_density:
+            self.lattice += self.rng.poisson(self.density, size=(self.L,self.L))
+        else:
+            ix = self.rng.randint(self.L, size=(self.density,2))
+            for i in ix:
+                self.lattice[i[0],i[1]] += 1
+
+    def _relax_conserved(self, max_iters=10_000):
+        """Relax the system to an absorbing state synchronously while conserving particles.
+        
+        Parameters
+        ----------
+        max_iters : int, 10_000
+
+        Returns
+        -------
+        int
+            Lifetime of avalanche.
+        """
+
+        counter = 0
+        cascadeSize = 0
+        ix = self.lattice>=2
+        cascadeSize += ix.sum()
+        while ix.any() and counter<max_iters:
+            self.lattice, ix = random_transfer_periodic_2d(self.lattice)
+            cascadeSize += ix.sum()
+
+            counter += 1
+
+        return counter, cascadeSize
+
+    def _relax(self, max_iters=10_000):
+        """Relax the system to an absorbing state synchronously while losing particles at
+        endpoints. 
+        
+        Keep track of single special tracer particle which is uniformly and randomly
+        selected to be one of the two particles that moves from each lattice site. If it
+        is chosen, it moves in either direction. If it leaves the lattice, it does not
+        move.
+        
+        Parameters
+        ----------
+        max_iters : int, 10_000
+
+        Returns
+        -------
+        int
+            Lifetime of avalanche.
+        int
+            Size of cascade as the number of affected sites per turn summed.
+        int 
+            Location of tracer particle.
+        """
+
+        counter = 0
+        cascadeSize = 0  # should be related to the number of particles lost on the side
+        ix = self.lattice>=2
+        while ix.any() and counter<max_iters:
+            # move one particle to the left and one to the right for each overloaded site
+            self.lattice, ix = random_transfer_2d(self.lattice)
+            cascadeSize += ix.sum()
+            counter += 1
+
+        return counter, cascadeSize
+
+    def relax(self, conserved=False, **kwargs):
+        if conserved:
+            return self._relax_conserved(**kwargs)
+        return self._relax(**kwargs)
+    
+    def add(self, ix=None):
+        """Add a particle to a spot on the lattice.
+
+        Parameters
+        ----------
+        ix : int
+        """
+
+        ix = ix or self.rng.randint(self.L, size=2)
+        self.lattice[ix[0],ix[1]] += 1
+
+    def remove(self, ix=None):
+        """Remove a particle from a site on the lattice.
+
+        Parameters
+        ----------
+        ix : twople, None
+        """
+        
+        if ix:
+            assert self.lattice[ix[0],ix[1]]
+            self.lattice[ix[0],ix[1]] -= 1
+            return
+        
+        ix = np.where(self.lattice)
+        ixofix = self.rng.randint(ix[0].size)
+        self.lattice[ix[0][ixofix],ix[1][ixofix]] -= 1
+
+@njit
+def random_transfer_2d(lattice):
+    """Randomly transfer 2 particles from each site to adjacent sites when there are at
+    least two particles per site.
+
+    Parameters
+    ----------
+    lattice : ndarray
+
+    Returns
+    -------
+    ndarray
+        Copy of new lattice.
+    ndarray
+        Index array of where there was toppling.
+    """
+    
+    newlattice = np.zeros(lattice.shape, dtype=uint64)
+    ix = np.zeros(lattice.shape, dtype=boolean)
+
+    for i in range(lattice.size):
+        for j in range(lattice.size):
+            if lattice[i,j]>=2:
+                ix[i,j] = True
+                newlattice[i,j] += lattice[i,j]-2
+                for particleix in range(2):
+                    if np.random.rand()<.5:
+                        if i>0:
+                            if np.random.rand()<.5:
+                                if j>0:
+                                    newlattice[i-1,j-1] += 1
+                            elif (j+1)<lattice.size:
+                                newlattice[i-1,j+1] += 1
+                    elif i<(lattice.size-1):
+                        if np.random.rand()<.5:
+                            if j>0:
+                                newlattice[i+1,j-1] += 1
+                        elif j<(lattice.size-1):
+                            newlattice[i+1,j+1] += 1
+            else:
+                newlattice[i,j] += lattice[i,j]
+    return newlattice, ix
+
+@njit
+def random_transfer_periodic_2d(lattice):
+    """Randomly transfer 2 particles from each site to adjacent sites when there are at
+    least two particles per site.
+
+    Parameters
+    ----------
+    lattice : ndarray
+
+    Returns
+    -------
+    ndarray
+        Copy of new lattice.
+    ndarray
+        Index array of where there was toppling.
+    """
+    
+    newlattice = np.zeros(lattice.shape, dtype=uint64)
+    ix = np.zeros(lattice.shape, dtype=boolean)
+    L = lattice.shape[0]
+
+    for i in range(L):
+        for j in range(L):
+            if lattice[i,j]>=2:
+                ix[i,j] = True
+                newlattice[i,j] += lattice[i,j]-2
+                for particleix in range(2):
+                    if np.random.rand()<.5:
+                        if np.random.rand()<.5:
+                            newlattice[(i-1)%L,(j-1)%L] += 1
+                        else:
+                            newlattice[(i-1)%L,(j+1)%L] += 1
+                    else:
+                        if np.random.rand()<.5:
+                            newlattice[(i+1)%L,(j-1)%L] += 1
+                        else:
+                            newlattice[(i+1)%L,(j+1)%L] += 1
+            else:
+                newlattice[i,j] += lattice[i,j]
+    return newlattice, ix
+#end ARW2D
+
+
 class ARW1DNetwork():
     """Linked network of 1D ARW simulations. "Instigator" particles moves in between them.
     """

@@ -13,6 +13,14 @@ def test_random_transfer_periodic():
     assert lattice.sum()==n
     print("Test passed: Number of particles conserved.")
 
+def test_random_transfer_periodic_2d():
+    np.random.seed(0)
+    lattice = np.random.poisson(2, size=(10,10))
+    n = lattice.sum()
+    lattice, _ = random_transfer_periodic_2d(lattice)
+    assert lattice.sum()==n
+    print("Test passed: Number of particles conserved.")
+
 def test_ARW1D():
     arw = ARW1D(.9, 1000)
     n = arw.lattice.sum()
