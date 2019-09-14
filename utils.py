@@ -7,7 +7,8 @@ from misc.utils import hist_log
 
 
 def log_binned_p(x, bins):
-    """
+    """Integer x-axis histogram.
+
     Parameters
     ----------
     x : ndarray
@@ -24,7 +25,9 @@ def log_binned_p(x, bins):
     """
 
     pt, xt, xbins = hist_log(x, bins)
-    pt = pt/np.diff(xbins)
-    pt = pt/pt.sum()
+    nint = np.diff(xbins)  # number of integers in each interval
+    nint[np.mod(xbins[:-1],1)==0] += 1
+    pt = pt / nint
+    pt = pt / pt.sum()
     
     return pt, xt, xbins
