@@ -272,7 +272,7 @@ def random_transfer_periodic_1d(lattice):
 #end ARW1D
 
 
-class ARW2D():
+class ARW2D(ARW1D):
     def __init__(self, density, L,
                  rng=np.random,
                  density_as_particle_number=False):
@@ -421,9 +421,10 @@ def random_transfer_2d(lattice, k):
     
     newlattice = np.zeros(lattice.shape, dtype=uint64)
     ix = np.zeros(lattice.shape, dtype=boolean)
+    L = newlattice.shape[0]
 
-    for i in range(lattice.size):
-        for j in range(lattice.size):
+    for i in range(L):
+        for j in range(L):
             if lattice[i,j]>=k:
                 ix[i,j] = True
                 newlattice[i,j] += lattice[i,j]-k
@@ -433,13 +434,13 @@ def random_transfer_2d(lattice, k):
                             if np.random.rand()<.5:
                                 if j>0:
                                     newlattice[i-1,j-1] += 1
-                            elif (j+1)<lattice.size:
+                            elif (j+1)<L:
                                 newlattice[i-1,j+1] += 1
-                    elif i<(lattice.size-1):
+                    elif i<(L-1):
                         if np.random.rand()<.5:
                             if j>0:
                                 newlattice[i+1,j-1] += 1
-                        elif j<(lattice.size-1):
+                        elif j<(L-1):
                             newlattice[i+1,j+1] += 1
             else:
                 newlattice[i,j] += lattice[i,j]
