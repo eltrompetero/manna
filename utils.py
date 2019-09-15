@@ -23,7 +23,8 @@ def log_binned_p(x, bins):
     ndarray
         Edges of bins.
     """
-
+    
+    assert (x>0).all()
     pt, xt, xbins = hist_log(x, bins)
     nint = np.diff(xbins)  # number of integers in each interval
     nint[np.mod(xbins[:-1],1)==0] += 1

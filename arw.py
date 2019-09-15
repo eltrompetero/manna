@@ -162,7 +162,9 @@ class ARW1D():
 
     def sample(self, n_samples,
                max_iters=1_000_000,
-               conserved=False):
+               conserved=False,
+               return_sx=False,
+               **kwargs):
         """Sample cascades. Likely, you will want to relax the system to a stable
         configuration first by calling relax().
 
@@ -172,6 +174,8 @@ class ARW1D():
         max_iters : int, 1_000_000
         conserved : bool, False
             If True, conserve particle number.
+        return_sx : bool, False
+            If True, return the number of unique lattice sites hit at every synchronous update.
 
         Returns
         -------
@@ -180,13 +184,29 @@ class ARW1D():
         ndarray
             Sizes measured by the number of active sites. The total number of particles
             that move is a constant multiplied by this.
-         ndarray
+        ndarray (optional)
             Sizes measured by the number of unique sites affected.           
         """
 
         t = np.zeros(n_samples, dtype=int)
         s = np.zeros(n_samples, dtype=int)
         sx = np.zeros(n_samples, dtype=int)  # unique sites affected
+        
+        if return_sx:
+            i = 0
+            while i<n_samples:
+                self.add()
+                if conserved:
+                    self.remove()
+                
+                t[i], cumix = self.relax(conserved=conserved, max_iters=max_iters, **kwargs)
+                s[i] = cumix.sum()
+                sx[i] = (cumix>0).sum()
+                # ignore moves that don't cause any cascade
+                if t[i]==1:
+                    i -= 1
+                i += 1
+            return t, s, sx
 
         i = 0
         while i<n_samples:
@@ -194,15 +214,14 @@ class ARW1D():
             if conserved:
                 self.remove()
             
-            t[i], cumix = self.relax(conserved=conserved, max_iters=max_iters)
+            t[i], cumix = self.relax(conserved=conserved, max_iters=max_iters, **kwargs)
             s[i] = cumix.sum()
-            sx[i] = (cumix>0).sum()
             # ignore moves that don't cause any cascade
-            if t[i]==0:
+            if t[i]==1:
                 i -= 1
             i += 1
 
-        return t, s, sx
+        return t, s
 
 @njit
 def random_transfer_1d(lattice, k):
@@ -311,7 +330,7 @@ class ARW2D(ARW1D):
             for i in ix:
                 self.lattice[i[0],i[1]] += 1
 
-    def _relax_conserved(self, max_iters=10_000):
+    def _relax_conserved(self, max_iters=10_000, seed=-1):
         """Relax the system to an absorbing state synchronously while conserving particles.
         
         Parameters
@@ -327,16 +346,21 @@ class ARW2D(ARW1D):
         counter = 0
         cascadeSize = 0
         ix = self.lattice>=2
-        cascadeSize += ix.sum()
-        while ix.any() and counter<max_iters:
-            self.lattice, ix = random_transfer_periodic_2d(self.lattice, 2)
-            cascadeSize += ix.sum()
+        cumix = np.zeros_like(self.lattice)
 
+        # only set seed once (state is preserved)
+        self.lattice, ix = random_transfer_periodic_2d(self.lattice, 2, seed)
+        cumix += ix
+        counter += 1
+
+        while ix.any() and counter<max_iters:
+            self.lattice, ix = random_transfer_periodic_2d(self.lattice, 2, -1)
+            cumix += ix
             counter += 1
 
-        return counter, cascadeSize
+        return counter, cumix
 
-    def _relax(self, max_iters=10_000):
+    def _relax(self, max_iters=10_000, seed=-1):
         """Relax the system to an absorbing state synchronously while losing particles at
         endpoints. 
         
@@ -348,6 +372,7 @@ class ARW2D(ARW1D):
         Parameters
         ----------
         max_iters : int, 10_000
+        seed : int, -1
 
         Returns
         -------
@@ -360,44 +385,57 @@ class ARW2D(ARW1D):
         counter = 0
         ix = self.lattice>=2
         cumix = np.zeros_like(self.lattice)
+
+        # only set seed once (state is preserved)
+        self.lattice, ix = random_transfer_2d(self.lattice, 2, seed)
+        cumix += ix
+        counter += 1
+
         while ix.any() and counter<max_iters:
             # move one particle to the left and one to the right for each overloaded site
-            self.lattice, ix = random_transfer_2d(self.lattice, 2)
+            self.lattice, ix = random_transfer_2d(self.lattice, 2, -1)
             cumix += ix
             counter += 1
 
         return counter, cumix
 
-    def _relax_snapshot(self, max_iters=10_000):
+    def _relax_snapshot(self, max_iters=10_000, seed=-1):
         """This is the same as ._relax() except that we save snapshot of toppling points
         at every iteration.
         
         Parameters
         ----------
         max_iters : int, 10_000
-
+        seed : int, -1
+        
         Returns
         -------
         int
             Lifetime of avalanche.
         int
-            Size of cascade as the number of affected sites per turn summed.
+            Number of times each lattice site topples in the same shape as lattice.
         int 
             List of indices tracking each site that has collapsed at each time step.
         """
 
         ixHistory = []
         counter = 0
-        cascadeSize = 0  # should be related to the number of particles lost on the side
         ix = self.lattice>=2
+        cumix = np.zeros_like(self.lattice)
+
+        self.lattice, ix = random_transfer_2d(self.lattice, 2, seed)
+        ixHistory.append(ix)
+        cumix += ix
+        counter += 1
+
         while ix.any() and counter<max_iters:
             # move one particle to the left and one to the right for each overloaded site
-            self.lattice, ix = random_transfer_2d(self.lattice, 2)
+            self.lattice, ix = random_transfer_2d(self.lattice, 2, -1)
             ixHistory.append(ix)
-            cascadeSize += ix.sum()
+            cumix += ix
             counter += 1
 
-        return counter, cascadeSize, ixHistory
+        return counter, cumix, ixHistory
 
     def relax(self, conserved=False, **kwargs):
         if conserved:
@@ -433,7 +471,7 @@ class ARW2D(ARW1D):
         self.lattice[ix[0][ixofix],ix[1][ixofix]] -= 1
 
 @njit
-def random_transfer_2d(lattice, k):
+def random_transfer_2d(lattice, k, seed):
     """Randomly transfer k particles from each site to adjacent sites when there are at
     least two particles per site.
 
@@ -441,6 +479,7 @@ def random_transfer_2d(lattice, k):
     ----------
     lattice : ndarray
     k : int
+    seed : int
 
     Returns
     -------
@@ -449,6 +488,9 @@ def random_transfer_2d(lattice, k):
     ndarray
         Index array of where there was toppling.
     """
+
+    if seed>-1:
+        np.random.seed(seed)
     
     newlattice = np.zeros(lattice.shape, dtype=uint64)
     ix = np.zeros(lattice.shape, dtype=boolean)
@@ -477,7 +519,7 @@ def random_transfer_2d(lattice, k):
     return newlattice, ix
 
 @njit
-def random_transfer_periodic_2d(lattice, k):
+def random_transfer_periodic_2d(lattice, k, seed):
     """Randomly transfer 2 particles from each site to adjacent sites when there are at
     least two particles per site.
 
@@ -485,6 +527,7 @@ def random_transfer_periodic_2d(lattice, k):
     ----------
     lattice : ndarray
     k : int
+    seed : int
 
     Returns
     -------
@@ -494,6 +537,9 @@ def random_transfer_periodic_2d(lattice, k):
         Index array of where there was toppling.
     """
     
+    if seed>-1:
+        np.random.seed(seed)
+
     newlattice = np.zeros(lattice.shape, dtype=uint64)
     ix = np.zeros(lattice.shape, dtype=boolean)
     L = lattice.shape[0]
