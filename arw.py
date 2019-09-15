@@ -5,6 +5,7 @@
 import numpy as np
 from numba import njit
 from numba import boolean, uint64
+from scipy.sparse import csr_matrix
 
 
 class ARW1D():
@@ -563,6 +564,193 @@ def random_transfer_periodic_2d(lattice, k, seed):
                 newlattice[i,j] += lattice[i,j]
     return newlattice, ix
 #end ARW2D
+
+
+class ARWGraph(ARW1D):
+    """ARW model on arbitrary graph specified by adjacency matrix.
+    """
+    def __init__(self, density, adj,
+                 rng=np.random,
+                 density_as_particle_number=False):
+        """
+        Parameters
+        ----------
+        density : float
+        adj : scipy.sparse.csr_matrix
+            If the matrix is wider than it is long, any cols beyond the number of rows is
+            an absorbing state.
+        rng : np.random.RandomState, np.random
+        density_as_particle_number : bool, False
+            If True, take density parameter as the total number of particles instead. Must
+            be an integer in this case.
+        """
+        
+        assert 0<density
+        assert type(adj) is csr_matrix
+        
+        if density_as_particle_number:
+            assert density%1==0, "If specifying particle number this must be an integer."
+        self.density = density
+        self.density_is_density = not density_as_particle_number
+        self.adj = adj
+        self.L = self.adj.shape[0]
+        self.rng = rng
+
+        self.initialize()
+
+    def _relax_conserved(self, max_iters=10_000, seed=-1):
+        """Relax the system to an absorbing state synchronously while conserving particles.
+        
+        Parameters
+        ----------
+        max_iters : int, 10_000
+
+        Returns
+        -------
+        int
+            Lifetime of avalanche.
+        """
+        return
+
+    def _relax(self, max_iters=10_000, seed=-1):
+        """Relax the system to an absorbing state synchronously while losing particles at
+        endpoints. 
+        
+        Keep track of single special tracer particle which is uniformly and randomly
+        selected to be one of the two particles that moves from each lattice site. If it
+        is chosen, it moves in either direction. If it leaves the lattice, it does not
+        move.
+        
+        Parameters
+        ----------
+        max_iters : int, 10_000
+        seed : int, -1
+
+        Returns
+        -------
+        int
+            Lifetime of avalanche.
+        int
+            Number of times each lattice site topples in the same shape as lattice.
+        """
+
+        indices = self.adj.indices
+        indptr = self.adj.indptr
+
+        counter = 0
+        ix = self.lattice>=2
+        cumix = np.zeros_like(self.lattice)
+
+        # only set seed once (state is preserved)
+        self.lattice, ix = random_transfer_graph(self.lattice, indices, indptr, 2, seed)
+        cumix += ix
+        counter += 1
+
+        while ix.any() and counter<max_iters:
+            # move one particle to the left and one to the right for each overloaded site
+            self.lattice, ix = random_transfer_graph(self.lattice, indices, indptr, 2, -1)
+            cumix += ix
+            counter += 1
+
+        return counter, cumix
+
+    def _relax_snapshot(self, max_iters=10_000, seed=-1):
+        """This is the same as ._relax() except that we save snapshot of toppling points
+        at every iteration.
+        
+        Parameters
+        ----------
+        max_iters : int, 10_000
+        seed : int, -1
+        
+        Returns
+        -------
+        int
+            Lifetime of avalanche.
+        int
+            Number of times each lattice site topples in the same shape as lattice.
+        int 
+            List of indices tracking each site that has collapsed at each time step.
+        """
+        
+        raise NotImplementedError
+        ixHistory = []
+        counter = 0
+        ix = self.lattice>=2
+        cumix = np.zeros_like(self.lattice)
+
+        self.lattice, ix = random_transfer_2d(self.lattice, 2, seed)
+        ixHistory.append(ix)
+        cumix += ix
+        counter += 1
+
+        while ix.any() and counter<max_iters:
+            # move one particle to the left and one to the right for each overloaded site
+            self.lattice, ix = random_transfer_2d(self.lattice, 2, -1)
+            ixHistory.append(ix)
+            cumix += ix
+            counter += 1
+
+        return counter, cumix, ixHistory
+    
+@njit
+def random_transfer_graph(lattice, indices, indptr, k, seed):
+    """Randomly transfer k particles from each site to adjacent sites when there are at
+    least two particles per site.
+
+    Parameters
+    ----------
+    lattice : ndarray
+    indices : ndarray
+    indptr : ndarray
+    k : int
+    seed : int
+
+    Returns
+    -------
+    ndarray
+        Copy of new lattice.
+    ndarray
+        Index array of where there was toppling.
+    """
+
+    if seed>-1:
+        np.random.seed(seed)
+    
+    L = lattice.size
+    newlattice = np.zeros(lattice.size, dtype=uint64)
+    ix = np.zeros(lattice.size, dtype=boolean)
+
+    lenindptr = len(indptr)
+
+    for i in range(L-1):
+        if lattice[i]>=k:
+            ix[i] = True
+            newlattice[i] += lattice[i]-k
+            for particleix in range(k):
+                nextix = np.random.choice(indices[indptr[i]:indptr[i+1]])
+                
+                if nextix<L:
+                    newlattice[nextix] += 1
+                # else particle disappears
+        else:
+            newlattice[i] += lattice[i]
+    
+    i += 1
+    if lattice[i]>=k:
+        ix[i] = True
+        newlattice[i] += lattice[i]-k
+        for particleix in range(k):
+            nextix = np.random.choice(indices[indptr[i]:])
+            
+            if nextix<L:
+                newlattice[nextix] += 1
+            # else particle disappears
+    else:
+        newlattice[i] += lattice[i]
+ 
+    return newlattice, ix
+#end ARWGraph
 
 
 class ARW1DNetwork():
